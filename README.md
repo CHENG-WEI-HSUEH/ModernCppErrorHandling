@@ -1,4 +1,4 @@
-# Objectives\
+# Objectives <br />
 
 - Demonstrate modern C++ error handling using std::expected (C++23) + std::variant + std::visit. <br />
 
