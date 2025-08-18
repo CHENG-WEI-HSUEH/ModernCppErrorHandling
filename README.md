@@ -17,6 +17,7 @@
 
 # - Directory Structure
 
+```text
 ModernCppErrorHandling/
 ├─ src/
 │  ├─ pipeline.hpp          # Declarations (Config/Errors + API)
@@ -25,6 +26,5 @@ ModernCppErrorHandling/
 │  └─ test_config_read_error.cpp   # GTest: verifies ConfigReadError propagation
 ├─ CMakeLists.txt
 └─ README.md
-
 
  Copyright [2025] [Smart Surgery Technology Co.]
