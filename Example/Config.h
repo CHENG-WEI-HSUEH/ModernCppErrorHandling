@@ -1,7 +1,7 @@
 // 這是「Include Guard」開頭：避免此標頭被同一個編譯單位重複包含造成重複定義
-#ifndef CONFIG_PROCESSING_UTILS_H
+#ifndef CONFIG_H
 // 與上方成對：定義一個巨集，代表此檔已被包含
-#define CONFIG_PROCESSING_UTILS_H
+#define CONFIG_H
 
 // 引入 C++23 的 std::expected / std::unexpected
 #include <expected>
