@@ -1,5 +1,5 @@
 // 引入對應的宣告標頭
-#include "Config_Processing_Utils.h"
+#include "Config.h"
 // 引入檔案 I/O
 #include <fstream>
 // 引入標準輸出入（除錯訊息）
