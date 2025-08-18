@@ -1,12 +1,12 @@
 # Objectives\
 
-- ## Demonstrate modern C++ error handling using std::expected (C++23) + std::variant + std::visit. <br />
+- Demonstrate modern C++ error handling using std::expected (C++23) + std::variant + std::visit. <br />
 
-- ## Provide unit tests (GoogleTest) that verify error propagation through a simple processing pipeline. <br />
+- Provide unit tests (GoogleTest) that verify error propagation through a simple processing pipeline. <br />
 
-- ## Target environment: Ubuntu on Windows Subsystem for Linux (WSL). <br />
+- Target environment: Ubuntu on Windows Subsystem for Linux (WSL). <br />
 
-- # Tech Stack <br />
+# Tech Stack <br />
 
 - Language: C++23 <br />
 
@@ -16,7 +16,7 @@
 
 - Compilers : g++ (Ubuntu 13.3.0-6ubuntu2~24.04) 13.3.0 <br />
 
-# - Directory Structure <br />
+# Directory Structure <br />
 
 ```text
 ModernCppErrorHandling/
