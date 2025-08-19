@@ -1,87 +1,80 @@
-\documentclass[12pt,a4paper]{article}
-\usepackage[UTF8]{ctex} % 中文支援（建議用 XeLaTeX 編譯）
-\usepackage{geometry}
-\geometry{margin=1in}
-\usepackage{hyperref}
-\hypersetup{colorlinks=true, linkcolor=blue, urlcolor=blue}
-\usepackage{listings}
-\usepackage{xcolor}
+# 現代 C++ 錯誤處理要點（`variant` / `expected` / `optional` / `[[nodiscard]]`）
 
-\lstdefinelanguage{C++}{
-  language=C++,
-  morekeywords={concept,requires,consteval,constinit,co_await,co_return,co_yield},
-  sensitive=true
-}
-\lstset{
-  language=C++,
-  basicstyle=\ttfamily\small,
-  columns=fullflexible,
-  breaklines=true,
-  frame=single,
-  showstringspaces=false,
-  tabsize=2,
-  keywordstyle=\color{blue!70!black}\bfseries,
-  commentstyle=\color{green!40!black}\itshape,
-  stringstyle=\color{red!60!black}
-}
+> 環境建議：GCC 13+ 或 Clang 16+，編譯選項 `-std=c++23`（因為使用 `std::expected`）。
 
-\title{現代 C++ 錯誤處理要點（variant / expected / optional / [[nodiscard]]）}
-\author{技術筆記}
-\date{\today}
+---
 
-\begin{document}
-\maketitle
+## 1) `using PipelineError = std::variant<...>`
 
-\section{1.\ using \texttt{PipelineError = std::variant<...>}}
-\textbf{目的}：將多種錯誤型別聚合為型別安全的聯合（tagged union）。同一時間只持有其中一種錯誤型別，並保留型別資訊以便處理。
+**用途**：把「多種錯誤型別」聚合成**單一錯誤容器**。`std::variant` 是 C++17 的型別安全聯合（tagged union），同一時間只持有其中一種型別的值，並保留型別資訊。
 
-\noindent\textbf{範例}：
-\begin{lstlisting}
-// 聚合不同錯誤的 payload
+**範例**
+```cpp
+#include <variant>
+#include <string>
+
 struct ReadError  { std::string filename; };
 struct ParseError { int line; std::string msg; };
 
-// 以 std::variant 統一錯誤型別
 using PipelineError = std::variant<ReadError, ParseError>;
-\end{lstlisting}
+```
 
-\section{2.\ Overloaded（合併多個 lambda 供 \texttt{std::visit} 使用）}
-\textbf{目的}：用多重繼承把多個 lambda 合併成一個可呼叫物件，方便對 \texttt{variant} 進行「模式比對」式分派。
+---
 
-\noindent\textbf{範例}：
-\begin{lstlisting}
+## 2) `Overloaded`（合併多個 lambda 供 `std::visit` 使用）
+
+**用途**：把多個 lambda 經由多重繼承合併成**一個**訪客，讓 `std::visit` 針對 `variant` 目前持有的型別做模式比對式分派。
+
+**範例**
+```cpp
 template<class... Ts>
-struct Overloaded : Ts... { using Ts::operator()...; };
-template<class... Ts>
-Overloaded(Ts...) -> Overloaded<Ts...>;
+struct Overloaded : Ts... { using Ts::operator()...; }
+
+// C++17 類型推導（可選）
+// template<class... Ts> Overloaded(Ts...) -> Overloaded<Ts...>;
+
+std::variant<ReadError, ParseError> v = ReadError{"config.json"};
 
 std::visit(Overloaded{
   [](const ReadError&  e){ std::cerr << "Read fail: "  << e.filename << "\n"; },
   [](const ParseError& e){ std::cerr << "Parse fail@"  << e.line << ": " << e.msg << "\n"; }
-}, someVariant);
-\end{lstlisting}
+}, v);
+```
 
-\section{3.\ \texttt{[[nodiscard]]}}
-\textbf{目的}：提醒（甚至要求）呼叫端\emph{不要忽略}回傳值，忽略時編譯器會警告。對錯誤處理容器（如 \texttt{expected} / \texttt{optional}）尤其重要。
+---
 
-\noindent\textbf{範例}：
-\begin{lstlisting}
+## 3) `[[nodiscard]]`
+
+**用途**：標註函式（或型別），**提醒不要忽略回傳值**；忽略時編譯器會警告。對錯誤處理容器（`expected` / `optional`）尤其重要。
+
+**範例**
+```cpp
 [[nodiscard]] bool ok();
-[[nodiscard("must check the result")]] std::expected<int, std::string> compute();
-\end{lstlisting}
 
-\section{4.\ \texttt{std::expected<T,E>}（C++23）}
-\textbf{語義}：要麼是成功的 \texttt{T}，要麼是錯誤的 \texttt{E}。提供單子操作（\texttt{and\_then}/\texttt{transform}/\texttt{or\_else}）讓流程可組合、可讀。
+[[nodiscard("must check result")]]
+std::expected<int, std::string> compute();
+```
 
-\noindent\textbf{常見介面}：\texttt{has\_value()}、\texttt{value()}、\texttt{error()}、\texttt{and\_then()}、\texttt{transform()}、\texttt{or\_else()}。
+---
 
-\noindent\textbf{範例}（讀檔字串 $\rightarrow$ 解析整數 $\rightarrow$ 倍增）：
-\begin{lstlisting}
+## 4) `std::expected<T,E>`（C++23）
+
+**語義**：**要嘛是成功的 `T`，要嘛是錯誤的 `E`**。提供單子操作（`and_then` / `transform` / `or_else` / `transform_error`），讓流程**可組合**且**可讀**；比起 exceptions，更顯式、可預測。
+
+**常見介面**
+- `has_value()` / `operator bool()`
+- `value()` / `*` / `->`
+- `error()`
+- `and_then(fn)`、`transform(fn)`、`or_else(fn)`、`transform_error(fn)`
+
+**範例：讀檔→解析整數→倍增**
+```cpp
 #include <expected>
 #include <fstream>
 #include <string>
+#include <variant>
 
-struct ReadError { std::string filename; };
+struct ReadError  { std::string filename; };
 struct ParseError { std::string text; };
 using Err = std::variant<ReadError, ParseError>;
 
@@ -103,26 +96,34 @@ int main() {
          .and_then(parse_int)
          .transform([](int x){ return x * 2; });
 
-  if (v) { /* 使用 *v */ } else { /* 根據 v.error() 分派 */ }
+  if (v) { /* 使用 *v */ } else { /* 根據 v.error() 做分派 */ }
 }
-\end{lstlisting}
+```
 
-\section{5.\ \texttt{std::variant}}
-\textbf{語義}：在多個候選型別之間擇一持有；搭配 \texttt{std::visit} 進行型別安全的動態分派。
+---
 
-\noindent\textbf{常見介面}：\texttt{std::holds\_alternative<T>}、\texttt{std::get<T>}、\texttt{std::get\_if<T>}、\texttt{index()}、\texttt{valueless\_by\_exception()}。
+## 5) `std::variant`（C++17）
 
-\noindent\textbf{範例}（錯誤列印）：
-\begin{lstlisting}
+**語義**：在多種候選型別間擇一持有；搭配 `std::visit` 進行型別安全的動態分派。
+
+**常見介面**
+- `std::holds_alternative<T>(v)`
+- `std::get<T>(v)` / `std::get_if<T>(&v)`
+- `v.index()` / `v.valueless_by_exception()`
+- `std::monostate`（需要「空型別」時）
+
+**範例：錯誤列印**
+```cpp
 #include <variant>
 #include <iostream>
+#include <string>
 
-struct ReadError { std::string filename; };
+struct ReadError  { std::string filename; };
 struct ParseError { int line; std::string msg; };
 using Error = std::variant<ReadError, ParseError>;
 
-template<class... Ts> struct Overloaded : Ts... { using Ts::operator()...; };
-template<class... Ts> Overloaded(Ts...) -> Overloaded<Ts...>;
+template<class... Ts> struct Overloaded : Ts... { using Ts::operator()...; }
+// template<class... Ts> Overloaded(Ts...) -> Overloaded<Ts...>;
 
 void print_error(const Error& e) {
   std::visit(Overloaded{
@@ -130,13 +131,16 @@ void print_error(const Error& e) {
     [](const ParseError& p){ std::cerr << "ParseError@"  << p.line << ": " << p.msg << "\n"; }
   }, e);
 }
-\end{lstlisting}
+```
 
-\section{6.\ \texttt{std::optional<T>}}
-\textbf{語義}：可能有一個 \texttt{T} 的值，也可能沒有；\textbf{不}攜帶錯誤資訊。適合「不存在是合理狀態」且不需說明原因的場合。C++23 也加入 \texttt{and\_then}/\texttt{transform}/\texttt{or\_else}。
+---
 
-\noindent\textbf{範例}（查表）：
-\begin{lstlisting}
+## 6) `std::optional<T>`（C++17；C++23 擴充單子操作）
+
+**語義**：**要嘛有一個 `T`，要嘛沒有**；不包含錯誤資訊。適合「不存在是正常情況」且不需要說明為何不存在的場景。C++23 也加入 `and_then` / `transform` / `or_else`。
+
+**範例：查表**
+```cpp
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -148,15 +152,17 @@ std::optional<int> get_price(const std::string& sku) {
 }
 
 int main() {
-  int price = get_price("C").value_or(0); // 沒有就回預設 0
+  int price = get_price("C").value_or(0); // 沒有就回預設值 0
 }
-\end{lstlisting}
+```
 
-\section{綜合示例：三段管線與四種錯誤}
-\noindent\textbf{說明}：使用 \texttt{std::expected<T,E>} 串接 \texttt{LoadConfig} $\rightarrow$ \texttt{ValidateData} $\rightarrow$ \texttt{ProcessData}，\texttt{E} 是 \texttt{std::variant} 聚合的多類錯誤，並用 \texttt{Overloaded} 配合 \texttt{std::visit} 分派。
+---
 
-\begin{lstlisting}
-// g++ -std=gnu++23 -O2 demo.cpp -o demo && ./demo
+## 綜合示例：三段管線與四種錯誤（可編譯）
+
+> 編譯：`g++ -std=gnu++23 -O2 demo.cpp -o demo && ./demo`
+
+```cpp
 #include <expected>
 #include <variant>
 #include <string>
@@ -171,8 +177,8 @@ struct ProcessingError { std::string task; std::string detail; };
 using PipelineError = std::variant<ConfigReadError, ConfigParseError,
                                    ValidationError, ProcessingError>;
 
-template<class... Ts> struct Overloaded : Ts... { using Ts::operator()...; };
-template<class... Ts> Overloaded(Ts...) -> Overloaded<Ts...>;
+template<class... Ts> struct Overloaded : Ts... { using Ts::operator()...; }
+// template<class... Ts> Overloaded(Ts...) -> Overloaded<Ts...>;
 
 struct Config        { std::string data; };
 struct ValidatedData { std::string processed; };
@@ -219,14 +225,13 @@ int main() {
     }, r.error());
   }
 }
-\end{lstlisting}
+```
 
-\section{選擇建議}
-\begin{itemize}
-  \item \textbf{optional}：只有「有/無」，不需錯誤上下文。
-  \item \textbf{variant}：值可在多型別間擇一；適合\emph{表達多種錯誤類別}或資料變體。
-  \item \textbf{expected}：\emph{成功或錯誤}，需要攜帶錯誤資訊且想避免例外時的首選；錯誤型別可用 \texttt{variant} 聚合。
-  \item \textbf{[[nodiscard]]}：回傳這些容器的 API 建議加註，避免調用方忽略。
-\end{itemize}
+---
 
-\end{document}
+## 何時選什麼？
+
+- **`std::optional<T>`**：只有「有/無」，不需錯誤上下文（如 map 查不到）。
+- **`std::variant<A,B,...>`**：值可在多型別間擇一；適合表達**多種錯誤類別**或資料變體；搭配 `std::visit`。
+- **`std::expected<T,E>`**：**成功或錯誤**的容器，當你需要**攜帶錯誤資訊**、又想**避免例外**時的首選；`E` 常常就是一個 `std::variant`。
+- **`[[nodiscard]]`**：回傳上述容器的 API 建議加註，避免調用方忽略結果。
