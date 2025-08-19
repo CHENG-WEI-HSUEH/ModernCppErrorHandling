@@ -454,3 +454,5 @@ int main() {
 
 - 良葛格, (n.d) '可變參數模版'. [Accessed: 19 Aug, 2025], Available at: https://openhome.cc/Gossip/CppGossip/VariadicTemplate.html.
 - cppreference, (n.d) 'Utility library'. [Accessed: 19 Aug, 2025], Available at: https://en.cppreference.com/w/cpp/utility.html
+
+> *Acknowledgment:* 本文件部分內容由 ChatGPT 協助產生與整理。
