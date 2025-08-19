@@ -448,3 +448,9 @@ int main() {
 | `transform` | 成功 | `T -> U` | `expected<U,E>` |
 | `or_else` | 失敗 | `E -> expected<T,E>` | `expected<T,E>` |
 | `transform_error` | 失敗 | `E -> F` | `expected<T,F>` |
+
+
+# Reference
+
+- 良葛格, (n.d) '可變參數模版'. [Accessed: 19 Aug, 2025], Available at: https://openhome.cc/Gossip/CppGossip/VariadicTemplate.html.
+- cppreference, (n.d) 'Utility library'. [Accessed: 19 Aug, 2025], Available at: https://en.cppreference.com/w/cpp/utility.html
