@@ -28,7 +28,7 @@ using PipelineError = std::variant<ReadError, ParseError>;
 **範例**
 ```cpp
 template<class... Ts>
-struct Overloaded : Ts... { using Ts::operator()...; }
+struct Overloaded : Ts... { using Ts::operator()...; };
 
 // C++17 類型推導（可選）
 // template<class... Ts> Overloaded(Ts...) -> Overloaded<Ts...>;
@@ -235,3 +235,216 @@ int main() {
 - **`std::variant<A,B,...>`**：值可在多型別間擇一；適合表達**多種錯誤類別**或資料變體；搭配 `std::visit`。
 - **`std::expected<T,E>`**：**成功或錯誤**的容器，當你需要**攜帶錯誤資訊**、又想**避免例外**時的首選；`E` 常常就是一個 `std::variant`。
 - **`[[nodiscard]]`**：回傳上述容器的 API 建議加註，避免調用方忽略結果。
+
+---
+
+## 補充：可變參數模板（Variadic Templates）
+
+可變參數模板讓你在**模板參數**或**函式參數**位置接收「0 個或多個」參數（稱為參數包 *parameter pack*）。用 `...` 做**包展開（pack expansion）**，將參數包逐一展開成多個實參或宣告。
+
+### 觀念速記
+- `template <class... Ts>`：宣告一個**型別參數包** `Ts...`。  
+- `Ts...`：指代整個參數包。  
+- 在出現 `Ts` 的地方用 `Ts...` 進行**展開**（例如繼承、`using`、初始化列）。  
+- **折疊運算式（fold expression）**：C++17 起可對參數包做歸約（如加總）。
+
+### 範例 A：`Overloaded` 的包展開
+```cpp
+template<class... Ts>
+struct Overloaded : Ts... {        // 多重繼承：同時繼承每個 Ts
+    using Ts::operator()...;       // 把每個基底 Ts 的 operator() 全數引入重載集合
+};
+// （可選）類型推導指引，讓 Overloaded{lambda1, lambda2, ...} 自動推導 Ts...
+// template<class... Ts> Overloaded(Ts...) -> Overloaded<Ts...>;
+```
+
+### 範例 B：折疊運算式（對參數包加總）
+```cpp
+#include <iostream>
+
+template<class... Ints>
+auto sum(Ints... xs) {
+    return (xs + ...); // 右折疊：(((x1 + x2) + x3) + ...)
+}
+
+int main() {
+    std::cout << sum(1, 2, 3, 4) << "\n"; // 10
+}
+```
+
+### 範例 C：初始化列展開（確保左到右順序）
+```cpp
+#include <iostream>
+
+template<class... Args>
+void print_all(const Args&... args) {
+    (void)std::initializer_list<int>{ ( (std::cout << args << " "), 0 )... };
+    std::cout << "\n";
+}
+
+int main() { print_all("id=", 42, ", ok=", true); }
+```
+
+---
+
+## `std::expected` 常見介面（逐一可編範例）
+
+> 環境：GCC 13+ / Clang 16+，`-std=c++23`。以下示例多以 `using Err = std::string;`，實務可改為 `std::variant` 或自訂錯誤型別。
+
+### 1) `has_value()` / `operator bool()` —— 是否成功
+```cpp
+#include <expected>
+#include <string>
+
+using Err = std::string;
+
+std::expected<int, Err> parse_pos_int(const std::string& s) {
+    if (s.empty() || s[0] == '-') return std::unexpected("not positive");
+    return std::stoi(s);
+}
+
+int main() {
+    auto e1 = parse_pos_int("123");
+    auto e2 = parse_pos_int("-1");
+
+    if (e1.has_value()) { /* success */ }
+    if (e1)              { /* 同等用法 */ }
+
+    if (!e2) { /* 處理錯誤 */ }
+}
+```
+
+### 2) `value()` / `*` / `->` —— 存取成功值
+```cpp
+#include <expected>
+#include <string>
+
+using Err = std::string;
+
+struct User { std::string name; size_t len() const { return name.size(); } };
+
+std::expected<User, Err> make_user(std::string s){
+    if (s.empty()) return std::unexpected("empty name");
+    return User{std::move(s)};
+}
+
+int main() {
+    auto u = make_user("Alice");
+    if (u) {
+        auto a = u.value();   // 取值（可能拷貝）
+        auto b = *u;          // 解參考
+        auto n = u->len();    // 透過箭號呼叫成員函式
+    }
+}
+```
+
+### 3) `error()` —— 讀取錯誤值
+```cpp
+#include <expected>
+#include <iostream>
+#include <string>
+
+using Err = std::string;
+
+std::expected<int, Err> must_be_even(int x) {
+    if (x % 2) return std::unexpected("odd not allowed");
+    return x;
+}
+
+int main() {
+    auto r = must_be_even(3);
+    if (!r) {
+        std::cerr << "error: " << r.error() << "\n"; // "odd not allowed"
+    }
+}
+```
+
+### 4) `and_then(fn)` —— 只有成功才串接下一步（fn 回傳 expected）
+```cpp
+#include <expected>
+#include <string>
+
+using Err = std::string;
+
+std::expected<int, Err> read_config_value() { return 10; } // 示意成功
+std::expected<int, Err> div2(int x) {
+    if (x % 2) return std::unexpected("not divisible by 2");
+    return x / 2;
+}
+
+int main() {
+    auto r = read_config_value()
+           .and_then(div2)        // 10 -> 5
+           .and_then(div2);       // 5  -> 錯誤（不是偶數）
+}
+```
+
+### 5) `transform(fn)` —— 成功值映射（fn 回傳非 expected）
+```cpp
+#include <expected>
+#include <string>
+
+using Err = std::string;
+
+std::expected<int, Err> get_length(std::string s){
+    if (s.empty()) return std::unexpected("empty");
+    return static_cast<int>(s.size());
+}
+
+int main() {
+    auto r = get_length("hello")
+            .transform([](int n){ return n * 3; }); // 成功值 *3
+    // r: expected<int, Err>；失敗時錯誤保持不變
+}
+```
+
+### 6) `or_else(fn)` —— 只有失敗才修補（fn 回傳 expected）
+```cpp
+#include <expected>
+#include <string>
+
+using Err = std::string;
+
+std::expected<int, Err> load_from_env()  { return std::unexpected("no env"); }
+std::expected<int, Err> load_from_file() { return 42; }
+
+int main() {
+    auto r = load_from_env()
+           .or_else([&](const Err&){ return load_from_file(); });
+    // env 失敗 -> 改從檔案載入；若環境成功，or_else 不會被呼叫
+}
+```
+
+### 7) `transform_error(fn)` —— 錯誤型別轉換
+```cpp
+#include <expected>
+#include <string>
+#include <variant>
+
+struct ReadError { std::string src; };
+struct ParseError{ int line; };
+
+using LowLevelErr  = std::string;                          // 底層錯誤（字串）
+using HighLevelErr = std::variant<ReadError, ParseError>;  // 高層錯誤（分類）
+
+std::expected<int, LowLevelErr> low_level() {
+    return std::unexpected("parse@ln=7"); // 假裝來自底層
+}
+
+int main() {
+    auto r = low_level()
+            .transform_error([](const LowLevelErr& s)->HighLevelErr {
+                if (s.find("parse@ln=") == 0) return ParseError{7};
+                return ReadError{"config.txt"};
+            });
+    // r: expected<int, HighLevelErr>
+}
+```
+
+### 速查表：`std::expected` 四種單子操作
+| 介面 | 何時呼叫 | 你給的函式 | 回傳 |
+|---|---|---|---|
+| `and_then` | 成功 | `T -> expected<U,E>` | `expected<U,E>` |
+| `transform` | 成功 | `T -> U` | `expected<U,E>` |
+| `or_else` | 失敗 | `E -> expected<T,E>` | `expected<T,E>` |
+| `transform_error` | 失敗 | `E -> F` | `expected<T,F>` |
