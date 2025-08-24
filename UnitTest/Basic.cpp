@@ -1,103 +1,154 @@
+// Basic.cpp
 #include <gtest/gtest.h>
-#include <Config.h>
+#include "Config.h"            // 與專案內部檔案一致，使用雙引號
 #include <expected>
 #include <filesystem>
 #include <fstream>
 #include <string>
-#include <string_view>
 #include <variant>
+#include <iostream>
 
-typedef struct _Vars
-{
-	string filename;
-	
-}Vars;
-const Vars AcsVars(Vars *input)
-{
-	if(input != nullptr)	static Vars output = input;
-	return output;
-}
+using namespace std;
+using namespace std::string_literals;
+using namespace config;        // 直接使用 config 命名空間中的 API/型別
+
 // ---------------------------
-// 1. 載入測試對象特徵
+// 測試用工具函式
+// ---------------------------
+
+// 建立檔案並寫入指定內容；回傳建立好的完整路徑
+static std::filesystem::path make_file_with(
+    const std::filesystem::path& dir,
+    const std::string& filename,
+    const std::string& content)
+{
+    std::filesystem::create_directories(dir);
+    auto p = dir / filename;
+    std::ofstream ofs(p, std::ios::binary);
+    ofs << content;
+    ofs.close();
+    return p;
+}
+
+// ---------------------------
+// 測試 Fixture
 // ---------------------------
 class ErrorCasesTest : public ::testing::Test {
 protected:
-	
-	const Vars VarsInfo;
-	
-	//創建檔案
-	std::filesystem::path make_file(const std::filesystem::path& filepath, std::string filename) 
-	{
-		//結合檔案路徑
-		auto p = filepath / filename;
-		//創建檔案
-		std::ofstream(p);
-		return p;
-	}
-	
-	//Google Test 初始化
-	void SetUp() override 
-	{
-		// 取得傳入參數
-		VarsInfo = AcsVars(nullptr);
-		
-		// 創建臨時資料夾
-		dir = std::filesystem::temp_directory_path() / "Temp";
-		std::error_code ec;
-		std::filesystem::create_directories(dir, ec);
-	}
-	// Google Test 解構
-	void TearDown() override 
-	{
-		std::error_code ec;
-		std::filesystem::remove_all(dir, ec);
-	}
+    std::filesystem::path dir;
+
+    // Google Test 初始化：建立臨時目錄
+    void SetUp() override {
+        // 使用作業系統臨時資料夾底下建立專屬子目錄
+        dir = std::filesystem::temp_directory_path() / "cfg_pipeline_tests";
+        std::error_code ec;
+        std::filesystem::create_directories(dir, ec);
+    }
+
+    // Google Test 解構：清理臨時目錄
+    void TearDown() override {
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+    }
 };
 
-// ---------------------------
-// 2. 加入測試場景
-// ---------------------------
+// ---------------------------------------------------------
+// 情境一：讀取不存在的檔案 -> 觸發 ConfigReadError
+// ---------------------------------------------------------
+TEST_F(ErrorCasesTest, ReadMissingFile_Triggers_ConfigReadError) {
+    // 建立一個必定不存在的路徑
+    auto path = dir / "does_not_exist.json";
 
-// 場景一 - 嘗試載入檔案
-TEST_F(ErrorCasesTest, FileNotFound) {
+    auto res = LoadConfig(path.string()); // 應該回傳 unexpected(ConfigReadError)  :contentReference[oaicite:2]{index=2}
+    ASSERT_FALSE(res.has_value()) << "此情境應為讀檔失敗";
 
-	// 創建"不存在的路徑"
-	auto path = dir / "not_exists.json"; 
-	
-	// 建立測試流程 : 讀檔 -> 資料驗證(是否包含 "invalid_field") -> 檢查資料長度
-    auto PP1_Res = LoadConfig(path)
-            .and_then([](const Config& cfg){ return ValidateData(cfg); })
-            .and_then([](const ValidatedData& vd){ return ProcessData(vd); });	
-	
-	// 成功載入檔案 (顯示結果)
-	if(PP1_Res)
-	{
-        std::cout << "\nPipeline Succeeded! Final Result Code: " << r->final_result_code << '\n';
-		return;
-	}
-	
-	// 使用 variant + visit 檢查具體錯誤型別
-	std::visit(Overloaded
-	{
-		[](const FileNotFoundError& e) 
-		{
-		  EXPECT_EQ(e.path, path.string());
-		},
-		[](const auto&) 
-		{
-		  ADD_FAILURE() << "Expected FileNotFoundError";
-		}
-	}, res.error());
+    // 使用 Overloaded + std::visit 檢查錯誤型別
+    std::visit(Overloaded{
+        [&](const ConfigReadError& e) {
+            // 驗證錯誤中帶有的檔名
+            EXPECT_EQ(e.filename, path.string());
+        },
+        [&](const auto&) {
+            ADD_FAILURE() << "預期為 ConfigReadError，但收到其他錯誤型別";
+        }
+    }, res.error());
 }
 
+// ---------------------------------------------------------
+// 情境二：讀到「malformed」內容 -> 觸發 ConfigParseError
+// 註：你的 LoadConfig 會在內容為空或包含 "malformed" 時回傳解析錯誤
+// ---------------------------------------------------------
+TEST_F(ErrorCasesTest, MalformedContent_Triggers_ConfigParseError) {
+    // 產生一個包含 "malformed" 的檔案
+    auto p = make_file_with(dir, "bad.cfg", "this is malformed configuration");
+    auto res = LoadConfig(p.string()); // 預期解析錯誤  :contentReference[oaicite:3]{index=3}
+    ASSERT_FALSE(res.has_value()) << "此情境應為解析失敗";
 
-// 3. 開始測試所有場景
-int main(int argc, char** argv) 
-{
-	//抓取 User 傳入參數
-	Vars fileinfo = {argv[1]};
-	AcsVars(&fileinfo);
-  
-	::testing::InitGoogleTest(&argc, argv);
-	return RUN_ALL_TESTS();
+    std::visit(Overloaded{
+        [&](const ConfigParseError& e) {
+            // 驗證錯誤內容帶有我們預期的片段與行號（目前實作使用行號 1）
+            EXPECT_EQ(e.line_content, "malformed");
+            EXPECT_EQ(e.line_number, 1);
+        },
+        [&](const auto&) {
+            ADD_FAILURE() << "預期為 ConfigParseError，但收到其他錯誤型別";
+        }
+    }, res.error());
+}
+
+// ---------------------------------------------------------
+// 情境三：內容含 invalid_field -> 驗證失敗 ValidationError
+// 管線：LoadConfig -> ValidateData
+// ---------------------------------------------------------
+TEST_F(ErrorCasesTest, InvalidField_Triggers_ValidationError) {
+    // 內容包含 invalid_field（但避免 "malformed" 關鍵字讓它停在 Parse）
+    auto p = make_file_with(dir, "invalid.cfg", R"(key=ok; invalid_field=bad;)");
+    auto res = LoadConfig(p.string())
+        .and_then([](const Config& cfg) { return ValidateData(cfg); }); // 期望在此步驟失敗  :contentReference[oaicite:4]{index=4}
+
+    ASSERT_FALSE(res.has_value()) << "此情境應為驗證失敗";
+
+    std::visit(Overloaded{
+        [&](const ValidationError& e) {
+            EXPECT_EQ(e.field_name, "invalid_field");
+            // e.invalid_value 的語義為說明字串，僅檢查非空
+            EXPECT_FALSE(e.invalid_value.empty());
+        },
+        [&](const auto&) {
+            ADD_FAILURE() << "預期為 ValidationError，但收到其他錯誤型別";
+        }
+    }, res.error());
+}
+
+// ---------------------------------------------------------
+// 情境四：處理階段資料太短 -> 觸發 ProcessingError
+//
+// 說明：依目前實作，ValidateData 會回傳 "Validated: " + 原字串，
+// 使處理前字串長度至少 11，正常管線下不可能 < 10，無法觸發 ProcessingError。
+// 因此此測試「直接」構造極短的 ValidatedData 後呼叫 ProcessData，
+// 以覆蓋該錯誤分支並驗證錯誤型別正確。                 :contentReference[oaicite:5]{index=5}
+// ---------------------------------------------------------
+TEST_F(ErrorCasesTest, TooShortData_Triggers_ProcessingError) {
+    ValidatedData very_short{ "x" }; // 刻意過短
+    auto res = ProcessData(very_short); // 預期為 ProcessingError（資料太短）  :contentReference[oaicite:6]{index=6}
+
+    ASSERT_FALSE(res.has_value()) << "此情境應為處理失敗";
+
+    std::visit(Overloaded{
+        [&](const ProcessingError& e) {
+            EXPECT_EQ(e.task_name, "Data Processing");
+            EXPECT_FALSE(e.details.empty());
+        },
+        [&](const auto&) {
+            ADD_FAILURE() << "預期為 ProcessingError，但收到其他錯誤型別";
+        }
+    }, res.error());
+}
+
+// ---------------------------------------------------------
+// main：執行所有測試
+// ---------------------------------------------------------
+int main(int argc, char** argv) {
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
 }
