@@ -3,12 +3,13 @@
 #include <expected>
 #include <filesystem>
 #include <fstream>
+#include <iterator>     // ← 使用 istreambuf_iterator 需要此標頭
 #include <string>
 #include <string_view>
 #include <variant>
 
 // ---------------------------
-// 1. 定義 錯類類型&錯誤回傳內容
+// 1. 定義 錯誤類型 & 錯誤回傳內容
 // ---------------------------
 struct FileNotFoundError   { std::string path; };
 struct PermissionError     { std::string path; };
@@ -32,199 +33,223 @@ template<class... Ts>
 Overloaded(Ts...) -> Overloaded<Ts...>;
 
 // ---------------------------
-// 1. 建立“被測”對象
+// 3. 建立“被測”對象
 // ---------------------------
-namespace demo 
+namespace demo
 {
-	// 縮寫
-	namespace fs = std::filesystem;
+    // 縮寫
+    namespace fs = std::filesystem;
 
-	// 功能: 讀取所有檔案 
-	// 若檔名含 "PERM_DENIED" 則 PermissionError；
-	// 若檔案內容含 "TRIGGER_IO_ERROR" → IOError)
-	[[nodiscard]] std::expected<std::string, Error>	ReadAll(const fs::path& p) 
-	{
-		// 取得檔案位置+檔名
-		const auto fname = p.filename().string();
-	
-		// 檔案不存在
-		if (!fs::exists(p)) 
-		  return std::unexpected(FileNotFoundError{p.string()});
-		
-		// 搜尋 "PERM_DENIED"
-		if (fname.find("PERM_DENIED") != std::string::npos) 
-		  return std::unexpected(PermissionError{p.string()}); // 模擬
+    // 功能: 讀取所有檔案
+    // 若檔名含 "PERM_DENIED" 則 PermissionError；
+    // 若檔案內容含 "TRIGGER_IO_ERROR" → IOError（模擬）
+    [[nodiscard]] std::expected<std::string, Error> ReadAll(const fs::path& p)
+    {
+        const auto fname = p.filename().string();
 
-		// 開啟檔案
-		std::ifstream fin(p, std::ios::binary);
-		
-		// 無法開啟
-		if (!fin.is_open()) 
-		  // 無法區分細項，就以一般 I/O 失敗處理
-		  return std::unexpected(IOError{p.string(), "open"});
+        // 檔案不存在
+        if (!fs::exists(p))
+            return std::unexpected(FileNotFoundError{p.string()});
 
-		// 取得內容
-		std::string content{std::istreambuf_iterator<char>(fin), {}};
-		
-		// 確認是否到達檔案結尾 & 讀取是否正常
-		if (!fin.good() && !fin.eof()) 
-		  return std::unexpected(IOError{p.string(), "read"});
-		
-		// 確認內容是否含 "TRIGGER_IO_ERROR"，若是則表示I/O錯誤
-		if (content.find("TRIGGER_IO_ERROR") != std::string::npos) 
-		  return std::unexpected(IOError{p.string(), "read (simulated)"});
+        // 檔名帶有 PERM_DENIED → 模擬權限被拒
+        if (fname.find("PERM_DENIED") != std::string::npos)
+            return std::unexpected(PermissionError{p.string()});
 
-		// 成功讀取
-		return content;
-	}
+        // 嘗試開檔
+        std::ifstream fin(p, std::ios::binary);
+        if (!fin.is_open())
+            return std::unexpected(IOError{p.string(), "open"});
 
-  // 功能: 解析檔案 
-  // 內容含 "MALFORMED" ， 則表示 格式有誤
-  // 若字數超過 1024 則 MemoryError（模擬 out-of-memory）
-  [[nodiscard]] std::expected<std::string, Error> ParseConfig(std::string content) 
-  {
-    // 確認內容是否含 "MALFORMED"，若是則表示格式有誤
-	if (content.find("MALFORMED") != std::string_view::npos) 
-      return std::unexpected(BadFormatError{"MALFORMED token", 1});
-    
-	// 若自數超過 1024 則 MemoryError（模擬 out-of-memory）
-    if (content.size() > 1024) 
-      return std::unexpected(MemoryError{"simulated out-of-memory"});
-    
-	// 模擬解析檔案內容
-	for(char &c: content)
-		c = c == 0? c : c-1;
-	
-    // 假設 config 是單純數字；不影響本例
-    return content;
-  }
+        // 讀取內容
+        std::string content{std::istreambuf_iterator<char>(fin), {}};
 
+        // 檢查讀取狀態：若既非 good 亦非 EOF，視為 I/O 錯誤
+        if (!fin.good() && !fin.eof())
+            return std::unexpected(IOError{p.string(), "read"});
 
+        // 內容含 TRIGGER_IO_ERROR → 模擬讀取錯誤
+        if (content.find("TRIGGER_IO_ERROR") != std::string::npos)
+            return std::unexpected(IOError{p.string(), "read (simulated)"});
 
-  // 模擬「同時開太多檔案」
-  [[nodiscard]] std::expected<void, Error> SimulateOpenMany(int count, int limit = 1024) 
-  {
-    if (count >= limit) 
-      return std::unexpected(TooManyOpenFiles{limit});
-    
-    return {};
-  }
+        return content;
+    }
 
-  // 建立 Pipeline：Read → Parse
-  [[nodiscard]] std::expected<int, Error>  LoadAndParse(const fs::path& p) 
-  {
-    return ReadAll(p).and_then(ParseConfig);
-  }
+    // 功能: 解析檔案
+    // 內容含 "MALFORMED" → BadFormatError
+    // 若字數超過 1024 → MemoryError（模擬 out-of-memory）
+    [[nodiscard]] std::expected<std::string, Error> ParseConfig(std::string content)
+    {
+        if (content.find("MALFORMED") != std::string::npos)
+            return std::unexpected(BadFormatError{"MALFORMED token", 1});
+
+        if (content.size() > 1024)
+            return std::unexpected(MemoryError{"simulated out-of-memory"});
+
+        // 模擬解析（做一點點轉換，實務上可忽略）
+        for (char &c : content)
+            c = (c == 0) ? c : static_cast<char>(c - 1);
+
+        return content;
+    }
+
+    // 模擬「同時開太多檔案」
+    [[nodiscard]] std::expected<void, Error> SimulateOpenMany(int count, int limit = 1024)
+    {
+        if (count >= limit)
+            return std::unexpected(TooManyOpenFiles{limit});
+        return {};
+    }
+
+    // 建立 Pipeline：Read → Parse
+    [[nodiscard]] std::expected<std::string, Error> LoadAndParse(const fs::path& p)
+    {
+        return ReadAll(p).and_then(ParseConfig);
+    }
 }
 
 // ---------------------------
-// 建立Google 測試 特徵
+// 4. 建立 Google 測試 Fixture
 // ---------------------------
-class ErrorCasesTest : public ::testing::Test 
+class ErrorCasesTest : public ::testing::Test
 {
-	protected:
-		std::filesystem::path dir;
-		
-		// 創建檔案
-		std::filesystem::path make_file(const std::string& name, std::string_view content) 
-		{
-			// 取得路徑 + 檔名
-			auto p = dir / name;
-			// 創建檔案
-			std::ofstream(p);
-			return p;
-		}
-		
-		// 建構子
-		void SetUp() override 
-		{
-			// 建立 Temp 資料夾
-			dir = std::filesystem::temp_directory_path() / "err_cases_demo";
-			std::error_code ec;
-			std::filesystem::create_directories(dir, ec);
-			// 清理舊檔
-			for (auto& e : std::filesystem::directory_iterator(dir, ec)) 
-			  std::filesystem::remove_all(e.path(), ec);
-			
-		}
-		
-		// 解構子
-		void TearDown() override 
-		{
-			std::error_code ec;
-			std::filesystem::remove_all(dir, ec);
-		}
+protected:
+    std::filesystem::path dir;
+
+    // 建立檔案並寫入內容
+    // ※ 修正點：原本沒有把 content 寫入檔案，會導致測不到錯誤
+    std::filesystem::path make_file(const std::string& name, std::string_view content)
+    {
+        auto p = dir / name;
+        std::ofstream ofs(p, std::ios::binary);
+        ofs.write(content.data(), static_cast<std::streamsize>(content.size()));
+        ofs.close();
+        return p;
+    }
+
+    void SetUp() override
+    {
+        dir = std::filesystem::temp_directory_path() / "err_cases_demo";
+        std::error_code ec;
+        std::filesystem::create_directories(dir, ec);
+        for (auto& e : std::filesystem::directory_iterator(dir, ec))
+            std::filesystem::remove_all(e.path(), ec);
+    }
+
+    void TearDown() override
+    {
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+    }
 };
 
 // ---------------------------
-// 建立測試場景
+// 5. 建立測試場景
 // ---------------------------
 
-// 1. 嘗試觸發 FileNotFoundError
-TEST_F(ErrorCasesTest, FileNotFound) {
-  auto path = dir / "not_exists.json"; // 保證不存在
-  auto r = demo::LoadAndParse(path);
-
-  // 使用 variant + visit 檢查具體錯誤型別
-  std::visit(Overloaded{
-    [&](const FileNotFoundError& e) {EXPECT_EQ(e.path, path.string());},
-    [&](const auto&) {ADD_FAILURE() << "Expected FileNotFoundError";}
-    }, r.error());
-}
-
-// 2. 嘗試觸發 PermissionError
-TEST_F(ErrorCasesTest, PermissionError_Read) 
+// 1) 觸發 FileNotFoundError
+TEST_F(ErrorCasesTest, FileNotFound)
 {
-  // 檔名帶 PERM_DENIED → 在 ReadAll() 模擬成 PermissionError
-  auto path = make_file("PERM_DENIED.json", "whatever");
-  auto r = demo::LoadAndParse(path);
+    auto path = dir / "not_exists.json"; // 保證不存在
+    auto r = demo::LoadAndParse(path);
 
-
-  std::visit(Overloaded{
-    [&](const PermissionError& e) {EXPECT_EQ(e.path, path.string());},
-    [&](const auto&) {ADD_FAILURE() << "Expected PermissionError";}
-    }, r.error());
-}
-// 3. 嘗試觸發 I/O 讀取錯
-TEST_F(ErrorCasesTest, IOError_Read) {
-  // 內容含 TRIGGER_IO_ERROR 觸發 I/O 讀取錯
-  auto path = make_file("io.json", "TRIGGER_IO_ERROR"); 
-  auto r = demo::LoadAndParse(path);
-
-
-  std::visit(Overloaded{
-    [&](const IOError& e) {EXPECT_EQ(e.path, path.string()); EXPECT_NE(e.op.find("read"), std::string::npos);},
-    [&](const auto&) {ADD_FAILURE() << "Expected IOError";}
+    ASSERT_FALSE(r.has_value()) << "此案例應為讀檔失敗(FileNotFound)。";
+    std::visit(Overloaded{
+        [&](const FileNotFoundError& e) { EXPECT_EQ(e.path, path.string()); },
+        [&](const auto&) { ADD_FAILURE() << "預期 FileNotFoundError。"; }
     }, r.error());
 }
 
-// 4. 嘗試觸發 BadFormat
-TEST_F(ErrorCasesTest, BadFormat) 
+// 2) 觸發 PermissionError（檔名含 PERM_DENIED）
+TEST_F(ErrorCasesTest, PermissionError_Read)
 {
-  // 寫入 MALFORMED 觸發 BadFormat
-  auto path = make_file("bad.json", "MALFORMED: token here");
-  auto r = demo::LoadAndParse(path);
+    auto path = make_file("PERM_DENIED.json", "whatever");
+    auto r = demo::LoadAndParse(path);
 
-
-  std::visit(Overloaded{
-    [&](const BadFormatError& e) {EXPECT_EQ(e.reason, "MALFORMED token"); EXPECT_EQ(e.line, 1);},
-    [&](const auto&) {ADD_FAILURE() << "Expected BadFormatError";}
+    ASSERT_FALSE(r.has_value()) << "此案例應為權限錯誤(PERM_DENIED 模擬)。";
+    std::visit(Overloaded{
+        [&](const PermissionError& e) { EXPECT_EQ(e.path, path.string()); },
+        [&](const auto&) { ADD_FAILURE() << "預期 PermissionError。"; }
     }, r.error());
 }
 
-// 5. 嘗試觸發 TooManyOpenFiles
-TEST_F(ErrorCasesTest, TooManyOpenFiles) {
-  // 直接呼叫模擬函式
-  auto r = demo::SimulateOpenMany(/*count*/4096, /*limit*/1024);
+// 3) 觸發 I/O 讀取錯（內容含 TRIGGER_IO_ERROR）
+TEST_F(ErrorCasesTest, IOError_Read)
+{
+    auto path = make_file("io.json", "TRIGGER_IO_ERROR");
+    auto r = demo::LoadAndParse(path);
 
-  std::visit(Overloaded{
-    [&](const TooManyOpenFiles& e) {EXPECT_EQ(e.limit, 1024);},
-    [&](const auto&) {ADD_FAILURE() << "Expected TooManyOpenFiles";}
+    ASSERT_FALSE(r.has_value()) << "此案例應為 I/O 錯誤（模擬 read 失敗）。";
+    std::visit(Overloaded{
+        [&](const IOError& e) {
+            EXPECT_EQ(e.path, path.string());
+            EXPECT_NE(e.op.find("read"), std::string::npos);
+        },
+        [&](const auto&) { ADD_FAILURE() << "預期 IOError。"; }
     }, r.error());
 }
 
-// 進行全測試
-int main(int argc, char** argv) {
-  ::testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
+// 4) 觸發 BadFormat（內容含 MALFORMED）
+TEST_F(ErrorCasesTest, BadFormat)
+{
+    auto path = make_file("bad.json", "MALFORMED: token here");
+    auto r = demo::LoadAndParse(path);
+
+    ASSERT_FALSE(r.has_value()) << "此案例應為解析錯誤(BadFormat)。";
+    std::visit(Overloaded{
+        [&](const BadFormatError& e) {
+            EXPECT_EQ(e.reason, "MALFORMED token");
+            EXPECT_EQ(e.line, 1);
+        },
+        [&](const auto&) { ADD_FAILURE() << "預期 BadFormatError。"; }
+    }, r.error());
 }
+
+// 5) 觸發 TooManyOpenFiles（直接呼叫模擬函式）
+TEST_F(ErrorCasesTest, TooManyOpenFiles)
+{
+    auto r = demo::SimulateOpenMany(/*count*/4096, /*limit*/1024);
+
+    ASSERT_FALSE(r.has_value()) << "此案例應為 TooManyOpenFiles。";
+    std::visit(Overloaded{
+        [&](const TooManyOpenFiles& e) { EXPECT_EQ(e.limit, 1024); },
+        [&](const auto&) { ADD_FAILURE() << "預期 TooManyOpenFiles。"; }
+    }, r.error());
+}
+
+// 6) 正向路徑（可選）：讀取 + 解析成功
+TEST_F(ErrorCasesTest, HappyPath)
+{
+    auto path = make_file("ok.json", "HELLO"); // 不含 MALFORMED / TRIGGER_IO_ERROR
+    auto r = demo::LoadAndParse(path);
+
+    ASSERT_TRUE(r.has_value()) << "此案例應為成功路徑。";
+    // 解析流程會對字元 -1，"HELLO" → "GDKKN"
+    EXPECT_EQ(*r, "GDKKN");
+}
+
+// 編譯指令: g++ -std=gnu++23 Advance.cpp -lgtest_main -lgtest -pthread -o advance_tests
+// 執行指令: ./advance_tests
+// 結果
+/*
+Running main() from ./googletest/src/gtest_main.cc
+[==========] Running 6 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 6 tests from ErrorCasesTest
+[ RUN      ] ErrorCasesTest.FileNotFound
+[       OK ] ErrorCasesTest.FileNotFound (0 ms)
+[ RUN      ] ErrorCasesTest.PermissionError_Read
+[       OK ] ErrorCasesTest.PermissionError_Read (0 ms)
+[ RUN      ] ErrorCasesTest.IOError_Read
+[       OK ] ErrorCasesTest.IOError_Read (0 ms)
+[ RUN      ] ErrorCasesTest.BadFormat
+[       OK ] ErrorCasesTest.BadFormat (0 ms)
+[ RUN      ] ErrorCasesTest.TooManyOpenFiles
+[       OK ] ErrorCasesTest.TooManyOpenFiles (0 ms)
+[ RUN      ] ErrorCasesTest.HappyPath
+[       OK ] ErrorCasesTest.HappyPath (0 ms)
+[----------] 6 tests from ErrorCasesTest (2 ms total)
+
+[----------] Global test environment tear-down
+[==========] 6 tests from 1 test suite ran. (2 ms total)
+[  PASSED  ] 6 tests.
+*/
