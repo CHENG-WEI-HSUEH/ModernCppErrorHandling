@@ -145,10 +145,46 @@ TEST_F(ErrorCasesTest, TooShortData_Triggers_ProcessingError) {
     }, res.error());
 }
 
-// ---------------------------------------------------------
-// main：執行所有測試
-// ---------------------------------------------------------
-int main(int argc, char** argv) {
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
-}
+// 編譯: g++ -std=gnu++23 Basic.cpp Config.cpp -I. -lgtest_main -lgtest -pthread -o test_basic
+// 執行: ./test_basic
+
+// 執行結果如下
+/*
+Running main() from ./googletest/src/gtest_main.cc
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from ErrorCasesTest
+[ RUN      ] ErrorCasesTest.ReadMissingFile_Triggers_ConfigReadError
+DEBUG: LoadConfig failed to open /tmp/cfg_pipeline_tests/does_not_exist.json
+[       OK ] ErrorCasesTest.ReadMissingFile_Triggers_ConfigReadError (2 ms)
+[----------] 1 test from ErrorCasesTest (2 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2 ms total)
+[  PASSED  ] 1 test.
+hsueh@HsuehChengWei:/mnt/c/Users/Administrator/Documents/Smartsurgery$ g++ -std=gnu++23 test.cpp Config.cpp -I. -lgtest_main -lgtest -pthread -o test_basic
+hsueh@HsuehChengWei:/mnt/c/Users/Administrator/Documents/Smartsurgery$ ./test_basic
+Running main() from ./googletest/src/gtest_main.cc
+[==========] Running 4 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 4 tests from ErrorCasesTest
+[ RUN      ] ErrorCasesTest.ReadMissingFile_Triggers_ConfigReadError
+DEBUG: LoadConfig failed to open /tmp/cfg_pipeline_tests/does_not_exist.json
+[       OK ] ErrorCasesTest.ReadMissingFile_Triggers_ConfigReadError (0 ms)
+[ RUN      ] ErrorCasesTest.MalformedContent_Triggers_ConfigParseError
+DEBUG: LoadConfig detected malformed config in /tmp/cfg_pipeline_tests/bad.cfg
+[       OK ] ErrorCasesTest.MalformedContent_Triggers_ConfigParseError (0 ms)
+[ RUN      ] ErrorCasesTest.InvalidField_Triggers_ValidationError
+DEBUG: Config loaded successfully from /tmp/cfg_pipeline_tests/invalid.cfg
+DEBUG: ValidateData detected invalid field.
+[       OK ] ErrorCasesTest.InvalidField_Triggers_ValidationError (0 ms)
+[ RUN      ] ErrorCasesTest.TooShortData_Triggers_ProcessingError
+DEBUG: ProcessData detected data too short.
+[       OK ] ErrorCasesTest.TooShortData_Triggers_ProcessingError (0 ms)
+[----------] 4 tests from ErrorCasesTest (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 4 tests from 1 test suite ran. (1 ms total)
+[  PASSED  ] 4 tests.
+
+*/
