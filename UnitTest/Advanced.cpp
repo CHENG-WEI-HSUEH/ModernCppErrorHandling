@@ -8,9 +8,8 @@
 #include <string_view>
 #include <variant>
 
-// ---------------------------
 // 1. 定義 錯誤類型 & 錯誤回傳內容
-// ---------------------------
+
 struct FileNotFoundError   { std::string path; };
 struct PermissionError     { std::string path; };
 struct IOError             { std::string path; std::string op; };
@@ -18,9 +17,8 @@ struct BadFormatError      { std::string reason; int line; };
 struct MemoryError         { std::string reason; };
 struct TooManyOpenFiles    { int limit; };
 
-// ---------------------------
+
 // 2. 串接 錯誤類型
-// ---------------------------
 using Error = std::variant<
   FileNotFoundError, PermissionError, IOError,
   BadFormatError, MemoryError, TooManyOpenFiles
@@ -32,9 +30,8 @@ struct Overloaded : Ts... { using Ts::operator()...; };
 template<class... Ts>
 Overloaded(Ts...) -> Overloaded<Ts...>;
 
-// ---------------------------
+
 // 3. 建立“被測”對象
-// ---------------------------
 namespace demo
 {
     // 縮寫
@@ -116,7 +113,6 @@ protected:
     std::filesystem::path dir;
 
     // 建立檔案並寫入內容
-    // ※ 修正點：原本沒有把 content 寫入檔案，會導致測不到錯誤
     std::filesystem::path make_file(const std::string& name, std::string_view content)
     {
         auto p = dir / name;
@@ -126,8 +122,10 @@ protected:
         return p;
     }
 
+    // Google Test 建構子
     void SetUp() override
     {
+        // 建立臨時資料夾
         dir = std::filesystem::temp_directory_path() / "err_cases_demo";
         std::error_code ec;
         std::filesystem::create_directories(dir, ec);
@@ -135,6 +133,7 @@ protected:
             std::filesystem::remove_all(e.path(), ec);
     }
 
+    // Google Test 解構子
     void TearDown() override
     {
         std::error_code ec;
@@ -142,11 +141,11 @@ protected:
     }
 };
 
-// ---------------------------
-// 5. 建立測試場景
-// ---------------------------
 
-// 1) 觸發 FileNotFoundError
+// 5. 建立測試場景
+
+
+// A. 觸發 FileNotFoundError
 TEST_F(ErrorCasesTest, FileNotFound)
 {
     auto path = dir / "not_exists.json"; // 保證不存在
@@ -159,7 +158,7 @@ TEST_F(ErrorCasesTest, FileNotFound)
     }, r.error());
 }
 
-// 2) 觸發 PermissionError（檔名含 PERM_DENIED）
+// B. 觸發 PermissionError（檔名含 PERM_DENIED）
 TEST_F(ErrorCasesTest, PermissionError_Read)
 {
     auto path = make_file("PERM_DENIED.json", "whatever");
@@ -172,7 +171,7 @@ TEST_F(ErrorCasesTest, PermissionError_Read)
     }, r.error());
 }
 
-// 3) 觸發 I/O 讀取錯（內容含 TRIGGER_IO_ERROR）
+// C. 觸發 I/O 讀取錯（內容含 TRIGGER_IO_ERROR）
 TEST_F(ErrorCasesTest, IOError_Read)
 {
     auto path = make_file("io.json", "TRIGGER_IO_ERROR");
@@ -188,7 +187,7 @@ TEST_F(ErrorCasesTest, IOError_Read)
     }, r.error());
 }
 
-// 4) 觸發 BadFormat（內容含 MALFORMED）
+// D. 觸發 BadFormat（內容含 MALFORMED）
 TEST_F(ErrorCasesTest, BadFormat)
 {
     auto path = make_file("bad.json", "MALFORMED: token here");
@@ -204,7 +203,7 @@ TEST_F(ErrorCasesTest, BadFormat)
     }, r.error());
 }
 
-// 5) 觸發 TooManyOpenFiles（直接呼叫模擬函式）
+// E. 觸發 TooManyOpenFiles（直接呼叫模擬函式）
 TEST_F(ErrorCasesTest, TooManyOpenFiles)
 {
     auto r = demo::SimulateOpenMany(/*count*/4096, /*limit*/1024);
@@ -216,7 +215,7 @@ TEST_F(ErrorCasesTest, TooManyOpenFiles)
     }, r.error());
 }
 
-// 6) 正向路徑（可選）：讀取 + 解析成功
+// F. 正向路徑（可選）：讀取 + 解析成功
 TEST_F(ErrorCasesTest, HappyPath)
 {
     auto path = make_file("ok.json", "HELLO"); // 不含 MALFORMED / TRIGGER_IO_ERROR
@@ -253,3 +252,4 @@ Running main() from ./googletest/src/gtest_main.cc
 [==========] 6 tests from 1 test suite ran. (2 ms total)
 [  PASSED  ] 6 tests.
 */
+
